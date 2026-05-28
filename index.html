@@ -395,18 +395,7 @@ select option{background:var(--ink3)}
   <div class="search-bar">
     <input type="text" id="searchInput" placeholder="Buscar nota, monto…" oninput="renderHist()">
     <button class="search-clr" id="searchClr" onclick="clearSearch()">✕</button>
-  </div>
-  <div class="page" id="p-config">
-  <div class="card">
-    <div class="card-hdr">Sincronización en la nube</div>
-    
-    <div class="cfg-item">
-      <div>
-        <div class="cfg-lbl">☁️ Google Drive Backup</div>
-        <div class="cfg-sub">Sincroniza tus datos locales con tu nube</div>
-      </div>
-      <button class="btn-ghost" onclick="handleSyncAuth()">Conectar</button>
-    </div>
+</div>
   <div class="card" style="padding:9px 12px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:8px;justify-content:space-between">
       <select id="filtCat" onchange="renderHist()" style="flex:1;font-size:12px;padding:7px 9px">
@@ -422,6 +411,17 @@ select option{background:var(--ink3)}
   </div>
   <div id="histList"></div>
 </div>
+  <div class="page" id="p-config">
+  <div class="card">
+    <div class="card-hdr">Sincronización en la nube</div>
+    <div class="cfg-item">
+      <div>
+        <div class="cfg-lbl">☁️ Google Drive Backup</div>
+        <div class="cfg-sub">Guarda tus datos en tu cuenta de Google</div>
+      </div>
+      <button class="btn-ghost" onclick="handleSyncAuth()">Conectar</button>
+    </div>
+  </div>
 
 <!-- PAGE 4: INFORME -->
 <div class="page" id="p-inf">
@@ -2358,6 +2358,83 @@ try{
   console.error('Init error:',e);
   document.body.innerHTML+='<div style="position:fixed;bottom:80px;left:12px;right:12px;background:#2a0a0a;border:1px solid #FF2D55;color:#FF8a8a;padding:14px;border-radius:10px;font-family:monospace;font-size:12px;z-index:9999">⚠️ Error de inicio: '+(e.message||e)+'<br><br><button onclick="localStorage.clear();location.reload()" style="margin-top:8px;background:#FF2D55;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-weight:800">Reset y recargar</button></div>';
 }
+// === CÓDIGO NUEVO PARA GOOGLE DRIVE ===
+const CLIENT_ID = 'TU_ID_DE_GOOGLE.apps.googleusercontent.com'; // <--- PON TU ID AQUÍ
+const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
+
+let tokenClient;
+
+function gapiLoaded() {
+  gapi.load('client', async () => {
+    await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+  });
+}
+
+function gisLoaded() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: '', // se define al hacer clic
+  });
+}
+
+function handleSyncAuth() {
+  tokenClient.callback = async (resp) => {
+    if (resp.error !== undefined) throw (resp);
+    await syncLocalToDrive();
+  };
+  tokenClient.requestAccessToken({prompt: 'consent'});
+}
+
+async function syncLocalToDrive() {
+  const localData = localStorage.getItem('kitsune_db'); // Verifica que este nombre coincida con tu localStorage
+  if (!localData) return alert("No hay datos para guardar");
+
+  try {
+    const response = await gapi.client.drive.files.list({
+      q: "name='kitsune_backup.json' and spaces='appDataFolder'",
+      fields: 'files(id)',
+    });
+
+    const files = response.result.files;
+    const fileId = files.length > 0 ? files[0].id : null;
+
+    if (fileId) {
+      // Actualiza si ya existe
+      await gapi.client.request({
+        path: `/upload/drive/v3/files/${fileId}`,
+        method: 'PATCH',
+        params: { uploadType: 'media' },
+        body: localData
+      });
+    } else {
+      // Crea uno nuevo si no existe
+      const metadata = { name: 'kitsune_backup.json', parents: ['appDataFolder'] };
+      const boundary = 'foo_bar_baz';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const close_delim = "\r\n--" + boundary + "--";
+      const contentType = 'application/json';
+      
+      const multipartRequestBody =
+        delimiter + 'Content-Type: application/json\r\n\r\n' + JSON.stringify(metadata) +
+        delimiter + 'Content-Type: ' + contentType + '\r\n\r\n' + localData + close_delim;
+
+      await gapi.client.request({
+        path: '/upload/drive/v3/files',
+        method: 'POST',
+        params: { uploadType: 'multipart' },
+        headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
+        body: multipartRequestBody
+      });
+    }
+    alert("✅ Sincronizado con Google Drive");
+  } catch (err) {
+    console.error(err);
+    alert("❌ Error al conectar con Drive");
+  }
+}
+// Fin del código adicional
 </script>
 </body>
 </html>
