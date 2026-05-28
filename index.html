@@ -263,6 +263,22 @@ select option{background:var(--ink3)}
 .cf-cancel{flex:1;padding:11px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--rs);font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer}
 .cf-ok{flex:1;padding:11px;background:var(--red);color:#fff;border:none;border-radius:var(--rs);font-family:var(--sans);font-size:13px;font-weight:800;cursor:pointer;letter-spacing:.3px}
 .cf-ok:disabled{opacity:.4;cursor:not-allowed}
+  /* ── PROYECTO: INVERSIONES Y TAREAS ── */
+.inv-item { display:flex; align-items:center; gap:10px; padding:10px 11px; background:var(--p1); border:1px solid var(--line); border-radius:var(--rs); margin-bottom:6px; }
+.inv-status { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+.inv-s-done { background:var(--green); box-shadow:0 0 8px var(--green); }
+.inv-s-pending { background:var(--amber); }
+.inv-s-cancelled { background:var(--red); }
+.task-item { display:flex; align-items:center; gap:10px; padding:10px 11px; background:var(--p1); border:1px solid var(--line); border-radius:var(--rs); margin-bottom:6px; transition:opacity 0.2s; }
+.task-item.done { opacity:0.5; }
+.task-check { width:22px; height:22px; border-radius:6px; border:2px solid var(--dim); display:flex; align-items:center; justify-content:center; font-size:12px; color:transparent; cursor:pointer; flex-shrink:0; transition:all 0.15s; }
+.task-check.checked { background:var(--green); border-color:var(--green); color:#fff; }
+.task-body { flex:1; min-width:0; }
+.task-name { font-size:13px; font-weight:700; transition:all 0.2s; }
+.task-item.done .task-name { text-decoration:line-through; color:var(--muted); }
+.task-meta { font-size:10px; color:var(--muted); margin-top:2px; }
+.task-del { background:none; border:none; color:var(--dim); font-size:14px; cursor:pointer; padding:3px; flex-shrink:0; transition:color 0.15s; }
+.task-del:active { color:var(--red); }
 /* ── V3: RECURRENTES ── */
 .rec-item{display:flex;align-items:center;gap:9px;padding:10px 11px;background:var(--p1);border:1px solid var(--line);border-radius:var(--rs);margin-bottom:6px;transition:border-color .15s;cursor:pointer}
 .rec-item:active{border-color:rgba(255,95,31,.3)}
@@ -1545,17 +1561,19 @@ function renderProj(){
   const lastAcc=months[months.length-1]?.accumulated||0;
   const totalRecIncome=months.reduce((s,m)=>s+m.totalRecIncome,0);
 
-  // Real avg comparison
-  const showReal=document.getElementById('togRealAvg')?.checked||false;
-  const nReal=parseInt(document.getElementById('nMesesReal')?.value||'3');
-  const realAvgData=showReal?calcPromedioReal(nReal):null;
-
-  document.getElementById('projKPI').innerHTML=`
+// Real avg comparison
+  const showReal = document.getElementById('togRealAvg')?.checked || false;
+  const nReal = parseInt(document.getElementById('nMesesReal')?.value || '3');
+  let realAvgData = null;
+  if (showReal) {
+    realAvgData = calcPromedioReal(nReal) || { avg: 0, count: 0 };
+  }
+document.getElementById('projKPI').innerHTML=`
     <div class="kb"><div class="kl">Excedente 14M</div><div class="kv ${totalExc>=0?'cg':'cr'}">${fmtS(totalExc)}</div><div class="ks">Incl. bonos</div></div>
     <div class="kb"><div class="kl">Solo bonos</div><div class="kv ca">${fmtS(totalBonos)}</div><div class="ks">CTS+Gratif+Util</div></div>
     <div class="kb"><div class="kl">Colchón final</div><div class="kv cb">${fmtS(lastAcc)}</div><div class="ks">Desde S/${fmtN(DB.cfg.colchon||0)}</div></div>
-    ${realAvgData
-      ? `<div class="kb" style="border-color:rgba(0,217,192,.2)"><div class="kl">Prom. real (${nReal}M)</div><div class="kv ct">${fmtS(realAvgData.avg)}</div><div class="ks">vs proyect. ${fmtS(months[0]?.totalGastos||0)} → ${months[0]?.totalGastos>realAvgData.avg?'<span style="color:var(--red)">▲ '+fmtS(months[0].totalGastos-realAvgData.avg)+'</span>':'<span style="color:var(--green)">▼ '+fmtS(realAvgData.avg-(months[0]?.totalGastos||0))+'</span>'}</div></div>`
+    ${showReal
+      ? `<div class="kb" style="border-color:rgba(0,217,192,.2)"><div class="kl">Prom. real (${nReal}M)</div><div class="kv ct">${fmtS(realAvgData.avg)}</div><div class="ks">${realAvgData.count === 0 ? 'Sin historial previo' : 'vs proyect. '+(months[0]?.totalGastos>realAvgData.avg?'<span style="color:var(--red)">▲ '+fmtS(months[0].totalGastos-realAvgData.avg)+'</span>':'<span style="color:var(--green)">▼ '+fmtS(Math.abs(realAvgData.avg-(months[0]?.totalGastos||0)))+'</span>')}</div></div>`
       : `<div class="kb"><div class="kl">Deuda total</div><div class="kv cr">${fmtS((DB.deudas||[]).reduce((s,d)=>s+d.saldo,0))}</div><div class="ks">Total deudas</div></div>`
     }`;
 
