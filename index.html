@@ -10,7 +10,7 @@
 <title>🦊 Kitsune Finance v3</title>
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#080812">
-<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{
   --fox:#FF5F1F;--fox2:#FF8347;--glow:rgba(255,95,31,.15);--foxd:rgba(255,95,31,.08);
@@ -2222,10 +2222,10 @@ function sendNotif(title, body, tag = 'kitsune') {
   if (Notification.permission !== 'granted') return;
   if (window._swReg) {
     window._swReg.showNotification(title, {
-      body, icon: './icons/icon-192.svg', badge: './icons/icon-192.svg', tag
+      body, icon: './icon-192.svg', badge: './icon-192.svg', tag
     });
   } else {
-    new Notification(title, { body, icon: './icons/icon-192.svg' });
+    new Notification(title, { body, icon: './icon-192.svg' });
   }
 }
 
