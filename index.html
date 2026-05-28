@@ -396,6 +396,17 @@ select option{background:var(--ink3)}
     <input type="text" id="searchInput" placeholder="Buscar nota, monto…" oninput="renderHist()">
     <button class="search-clr" id="searchClr" onclick="clearSearch()">✕</button>
   </div>
+  <div class="page" id="p-config">
+  <div class="card">
+    <div class="card-hdr">Sincronización en la nube</div>
+    
+    <div class="cfg-item">
+      <div>
+        <div class="cfg-lbl">☁️ Google Drive Backup</div>
+        <div class="cfg-sub">Sincroniza tus datos locales con tu nube</div>
+      </div>
+      <button class="btn-ghost" onclick="handleSyncAuth()">Conectar</button>
+    </div>
   <div class="card" style="padding:9px 12px;margin-bottom:10px">
     <div style="display:flex;align-items:center;gap:8px;justify-content:space-between">
       <select id="filtCat" onchange="renderHist()" style="flex:1;font-size:12px;padding:7px 9px">
