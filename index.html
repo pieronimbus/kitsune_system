@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<script src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
-<script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
@@ -13,6 +11,8 @@
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#080812">
 <link rel="apple-touch-icon" href="icon-192.png">
+<!-- Google Identity Services - cargar async para no bloquear -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{
   --fox:#FF5F1F;--fox2:#FF8347;--glow:rgba(255,95,31,.15);--foxd:rgba(255,95,31,.08);
@@ -317,6 +317,17 @@ select option{background:var(--ink3)}
 .task-meta{font-size:10px;color:var(--muted);margin-top:1px}
 .task-del{background:none;border:none;color:var(--dim);font-size:14px;cursor:pointer;padding:3px;border-radius:4px}
 .task-del:active{color:var(--red)}
+/* ── DRIVE SYNC ── */
+.drive-card{background:linear-gradient(135deg,rgba(56,186,255,.07),rgba(56,186,255,.02));border:1px solid rgba(56,186,255,.18);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.drive-status{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.drive-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background .3s}
+.drive-dot.idle{background:var(--dim)}
+.drive-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green)}
+.drive-dot.busy{background:var(--amber);animation:dpulse .8s infinite}
+.drive-dot.error{background:var(--red)}
+@keyframes dpulse{0%,100%{opacity:1}50%{opacity:.35}}
+.drive-lbl{font-size:11px;font-weight:700;flex:1}
+.drive-acts{display:flex;gap:7px;flex-wrap:wrap}
 @media(max-width:360px){
   .hero-amt{font-size:30px}
   .srow{grid-template-columns:1fr 1fr}
@@ -653,6 +664,25 @@ select option{background:var(--ink3)}
   <div class="card">
     <div class="card-hdr">🔔 Notificaciones</div>
     <div id="cfgNotif"></div>
+  </div>
+
+  <!-- DRIVE SYNC CARD -->
+  <div class="drive-card">
+    <div class="card-hdr" style="margin-bottom:10px">☁️ Google Drive · Backup en la nube</div>
+    <div class="drive-status">
+      <div class="drive-dot idle" id="driveDot"></div>
+      <div>
+        <div class="drive-lbl" id="driveLbl">Sin conectar</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:1px" id="driveSub">Tus datos solo en este dispositivo</div>
+      </div>
+    </div>
+    <div class="drive-acts">
+      <button class="btn-ghost btn-sm" onclick="driveSync()">☁️ Guardar en Drive</button>
+      <button class="btn-ghost btn-sm" onclick="driveRestore()">⬇️ Restaurar desde Drive</button>
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-top:9px;line-height:1.5">
+      Guarda en <b>appDataFolder</b> de tu Google Drive personal · solo visible para esta app · sin acceso a otros archivos
+    </div>
   </div>
   <div class="card">
     <div class="card-hdr">Datos del sistema</div>
@@ -2358,83 +2388,210 @@ try{
   console.error('Init error:',e);
   document.body.innerHTML+='<div style="position:fixed;bottom:80px;left:12px;right:12px;background:#2a0a0a;border:1px solid #FF2D55;color:#FF8a8a;padding:14px;border-radius:10px;font-family:monospace;font-size:12px;z-index:9999">⚠️ Error de inicio: '+(e.message||e)+'<br><br><button onclick="localStorage.clear();location.reload()" style="margin-top:8px;background:#FF2D55;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-weight:800">Reset y recargar</button></div>';
 }
-// === CÓDIGO NUEVO PARA GOOGLE DRIVE ===
-const CLIENT_ID = '264104658886-oeusok152i04r5kgn4ftb3p24888vgpn.apps.googleusercontent.com'; // <--- PON TU ID AQUÍ
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
+// ══════════════════════════════════════════════════════
+// GOOGLE DRIVE SYNC — fetch-based, sin gapi.client
+// ══════════════════════════════════════════════════════
+const DRIVE_CLIENT_ID = '264104658886-oeusok152i04r5kgn4ftb3p24888vgpn.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_FILE_NAME = 'kitsune_backup.json';
+const DRIVE_STORAGE_KEY = 'kf6'; // ← clave real del localStorage
 
-let tokenClient;
+let _driveToken = null;
+let _driveFileId = null;
+let _tokenClient = null;
+let _gisReady = false;
 
-function gapiLoaded() {
-  gapi.load('client', async () => {
-    await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] });
+// Inicializar cuando GIS está disponible
+function initDriveClient() {
+  if (!window.google?.accounts?.oauth2) return;
+  _tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: DRIVE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: _onDriveToken,
+    error_callback: (err) => {
+      console.warn('[Drive] Error auth:', err);
+      _driveSetState('error', 'Error de autenticación');
+    }
   });
+  _gisReady = true;
+  _driveSetState('idle', 'Listo para conectar');
 }
 
-function gisLoaded() {
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: '', // se define al hacer clic
-  });
+// Callback de OAuth
+function _onDriveToken(resp) {
+  if (resp.error) {
+    _driveSetState('error', 'No se pudo autenticar');
+    return;
+  }
+  _driveToken = resp.access_token;
+  _driveFileId = null; // invalidar cache al re-autenticar
 }
 
-function handleSyncAuth() {
-  tokenClient.callback = async (resp) => {
-    if (resp.error !== undefined) throw (resp);
-    await syncLocalToDrive();
+// Estado visual del Drive card
+function _driveSetState(state, lbl, sub) {
+  const dot = document.getElementById('driveDot');
+  const lblEl = document.getElementById('driveLbl');
+  const subEl = document.getElementById('driveSub');
+  if (!dot) return;
+  dot.className = 'drive-dot ' + state;
+  if (lbl && lblEl) lblEl.textContent = lbl;
+  if (sub && subEl) subEl.textContent = sub;
+}
+
+// Solicitar token (reusa si válido)
+function _requestToken(callback) {
+  if (!_gisReady) {
+    // GIS aún no cargó — reintentar en 800ms
+    if (window.google?.accounts?.oauth2) {
+      initDriveClient();
+    } else {
+      toast('⏳ Google aún cargando, intenta de nuevo en un momento');
+      setTimeout(() => { if (window.google?.accounts?.oauth2) initDriveClient(); }, 1000);
+      return;
+    }
+  }
+  if (!_tokenClient) { toast('❌ GIS no disponible'); return; }
+
+  // Si ya hay token válido, llamar callback directo
+  if (_driveToken) { callback(); return; }
+
+  // Pedir nuevo token
+  const origCallback = _tokenClient.callback;
+  _tokenClient.callback = (resp) => {
+    _onDriveToken(resp);
+    if (!resp.error && _driveToken) callback();
   };
-  tokenClient.requestAccessToken({prompt: 'consent'});
+  _tokenClient.requestAccessToken({ prompt: '' });
 }
 
-async function syncLocalToDrive() {
-  const localData = localStorage.getItem('kitsune_db'); // Verifica que este nombre coincida con tu localStorage
-  if (!localData) return alert("No hay datos para guardar");
+// Buscar o crear archivo en appDataFolder
+async function _getDriveFileId() {
+  if (_driveFileId) return _driveFileId;
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name%3D'${DRIVE_FILE_NAME}'+and+spaces%3D'appDataFolder'&fields=files(id)&spaces=appDataFolder`,
+    { headers: { Authorization: `Bearer ${_driveToken}` } }
+  );
+  if (!r.ok) { _driveToken = null; throw new Error('Token inválido o expirado'); }
+  const data = await r.json();
+  _driveFileId = data.files?.[0]?.id || null;
+  return _driveFileId;
+}
 
+// ── SYNC: Local → Drive ──
+async function _doSync() {
+  _driveSetState('busy', 'Guardando en Drive…', 'Conectando con Google');
   try {
-    const response = await gapi.client.drive.files.list({
-      q: "name='kitsune_backup.json' and spaces='appDataFolder'",
-      fields: 'files(id)',
-    });
+    const localData = localStorage.getItem(DRIVE_STORAGE_KEY);
+    if (!localData) { toast('⚠️ Sin datos para guardar'); _driveSetState('idle'); return; }
 
-    const files = response.result.files;
-    const fileId = files.length > 0 ? files[0].id : null;
+    const fileId = await _getDriveFileId();
+    const now = new Date().toLocaleString('es-PE');
 
     if (fileId) {
-      // Actualiza si ya existe
-      await gapi.client.request({
-        path: `/upload/drive/v3/files/${fileId}`,
-        method: 'PATCH',
-        params: { uploadType: 'media' },
-        body: localData
-      });
+      // PATCH: actualizar archivo existente
+      const r = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${_driveToken}`, 'Content-Type': 'application/json' },
+          body: localData
+        }
+      );
+      if (!r.ok) throw new Error('Error actualizando archivo');
     } else {
-      // Crea uno nuevo si no existe
-      const metadata = { name: 'kitsune_backup.json', parents: ['appDataFolder'] };
-      const boundary = 'foo_bar_baz';
-      const delimiter = "\r\n--" + boundary + "\r\n";
-      const close_delim = "\r\n--" + boundary + "--";
-      const contentType = 'application/json';
-      
-      const multipartRequestBody =
-        delimiter + 'Content-Type: application/json\r\n\r\n' + JSON.stringify(metadata) +
-        delimiter + 'Content-Type: ' + contentType + '\r\n\r\n' + localData + close_delim;
-
-      await gapi.client.request({
-        path: '/upload/drive/v3/files',
-        method: 'POST',
-        params: { uploadType: 'multipart' },
-        headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
-        body: multipartRequestBody
-      });
+      // POST: crear archivo nuevo
+      const meta = JSON.stringify({ name: DRIVE_FILE_NAME, parents: ['appDataFolder'] });
+      const body = '--boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+                   meta + '\r\n--boundary\r\nContent-Type: application/json\r\n\r\n' +
+                   localData + '\r\n--boundary--';
+      const r = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${_driveToken}`,
+            'Content-Type': 'multipart/related; boundary=boundary'
+          },
+          body
+        }
+      );
+      if (!r.ok) throw new Error('Error creando archivo');
+      const created = await r.json();
+      _driveFileId = created.id;
     }
-    alert("✅ Sincronizado con Google Drive");
+
+    const gs = DB.gastos?.length || 0;
+    _driveSetState('ok', '✅ Backup guardado', `${gs} registros · ${now}`);
+    toast('☁️ Guardado en Google Drive');
   } catch (err) {
-    console.error(err);
-    alert("❌ Error al conectar con Drive");
+    console.error('[Drive Sync]', err);
+    _driveToken = null; // invalidar token en error
+    _driveSetState('error', '❌ Error al guardar', err.message || 'Revisa la consola');
+    toast('❌ Error Drive: ' + (err.message || 'desconocido'));
   }
 }
-// Fin del código adicional
+
+// ── RESTORE: Drive → Local ──
+async function _doRestore() {
+  _driveSetState('busy', 'Descargando desde Drive…', 'Buscando backup');
+  try {
+    const fileId = await _getDriveFileId();
+    if (!fileId) {
+      _driveSetState('idle', 'Sin backup en Drive', 'No se encontró archivo');
+      toast('⚠️ No hay backup en Drive para este usuario');
+      return;
+    }
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${_driveToken}` } }
+    );
+    if (!r.ok) throw new Error('Error descargando archivo');
+    const data = await r.text();
+    const parsed = JSON.parse(data);
+
+    showConfirm({
+      icon: '⬇️',
+      title: '¿Restaurar backup de Drive?',
+      msg: `Se reemplazarán los datos locales actuales con el backup de Drive. Gastos registrados: ${parsed.gastos?.length || 0}.`,
+      okText: 'Restaurar',
+      onConfirm: () => {
+        DB = { ...DEFAULT_DB, ...parsed };
+        save();
+        render(activePage);
+        const now = new Date().toLocaleString('es-PE');
+        _driveSetState('ok', '✅ Datos restaurados', now);
+        toast('✅ Datos restaurados desde Drive');
+      }
+    });
+  } catch (err) {
+    console.error('[Drive Restore]', err);
+    _driveToken = null;
+    _driveSetState('error', '❌ Error al restaurar', err.message || '');
+    toast('❌ Error Drive: ' + (err.message || 'desconocido'));
+  }
+}
+
+// ── BOTONES públicos ──
+function driveSync() {
+  _requestToken(() => _doSync());
+}
+function driveRestore() {
+  _requestToken(() => _doRestore());
+}
+
+// Auto-inicializar cuando GIS cargue
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    if (window.google?.accounts?.oauth2) initDriveClient();
+    else {
+      // GIS puede cargar después del window.load
+      const check = setInterval(() => {
+        if (window.google?.accounts?.oauth2) { initDriveClient(); clearInterval(check); }
+      }, 500);
+      setTimeout(() => clearInterval(check), 8000); // timeout 8s
+    }
+  }, 300);
+});
 </script>
 </body>
 </html>
